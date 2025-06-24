@@ -1,0 +1,1 @@
+[System.Windows.MessageBox]::Show("Script berhasil dijalankan!")
